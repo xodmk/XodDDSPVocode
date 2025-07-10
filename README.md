@@ -1,122 +1,72 @@
-# XodDDSPVocode
-Audio vocoder with DDSP neural net phase processing 
-
-XodDDSPVox Project Plan
-
-1. Project Overview
-
-Goal: Build a VST3 audio plugin that performs real‑time phase‑vocoder processing using a neural network between STFT and iSTFT.
-
-Components: • ML training pipeline (PyTorch) • Model export to ONNX → TensorRT • C++ inference wrapper and real‑time integration • JUCE VST3 plugin hosting STFT ↔ NN ↔ ISTFT chain
-
-
-
-2. Outline Steps
-
-1. Data Preparation
-
-Collect or record 48 kHz stereo WAVs
-
-Generate paired targets (stretch, pitch, style) via SoX or Rubber Band
-
-Organize into training/validation sets
-
-
-
-2. Model Architecture & Training
-
-Define conditional U‑Net (encoder/decoder, FiLM layers for control vectors)
-
-Inputs: mag_x (freq×time), control vector c
-
-Output: complex phase map (real+imag)
-
-Losses: waveform L1/L2, multi‑resolution STFT, phase consistency
-
-Optimizer: AdamW, lr 1e‑4…1e‑3, mixed precision
-
-
-
-3. Export & Engine Build
-
-Export PyTorch model → ONNX (dynamic time axis)
-
-Build TensorRT engine (trtexec or C++ API) • FP16 mode, shape profiles
-
-
-
-4. C++ Inference Integration
-
-Implement TensorRTEngine class: • Load .trt file via TensorRT API • Allocate device buffers for inputs (mag, c) and output (phase) • infer(mag, c) → vector<complex<float>>
-
-Optimize for zero allocations
-
-
-
-5. Plugin Integration (JUCE VST3)
-
-In prepareToPlay(): • Initialize FFTW plans, window, ring buffers • Instantiate TensorRTEngine
-
-In processBlock(): • Ring‑buffer input audio frames • On each FFT hop: – Apply window + FFT → mag – Call infer(mag, controlVector) – Rebuild complex bins, IFFT + overlap‑add • Output processed audio
-
-Expose GUI parameters for control vector c
-
-
-
-
-
-3. Required Tools
-
-Python: PyTorch, torchaudio, sox CLI (for target generation)
-
-ONNX: torch.onnx
-
-TensorRT SDK: trtexec, C++ headers/libs
-
-C++ Frameworks: JUCE 7+, FFTW3 (or KissFFT), CUDA toolkit
-
-
-
-4. Important Techniques
-
-STFT/iSTFT: high‑quality overlap‑add, Hann windows
-
-U‑Net with FiLM: conditional feature‑wise modulation
-
-Loss Functions: waveform L1/L2, spectral convergence, multi‑res STFT, phase consistency
-
-Mixed Precision: torch.cuda.amp, TensorRT FP16
-
-Dynamic Shapes: ONNX dynamic time axis, TensorRT shape profiles
-
-Real‑Time Considerations: zero allocations, batch frames vs. latency, GPU vs. audio‑thread offload
-
-
-
-5. Key C++ Classes & Components
-
-TensorRTEngine • Methods: loadEngine(path), infer(mag, controlVec) • Manages: IRuntime, ICudaEngine, IExecutionContext, device buffers
-
-PhaseVocoderModel (optional libtorch/ONNX fallback) • TorchScript or ONNX Runtime loader for prototyping
-
-RingBuffer<T> • Circular buffer for streaming audio & overlap‑add
-
-PluginProcessor (inherits AudioProcessor) • Members: TensorRTEngine phaseEngine; Vector<float> window, fftIn; Vector<complex> fftOut; RingBuffer<float> inBuf, outBuf; AudioParameterFloat controls… • Methods: prepareToPlay(), processBlock() implementing STFT↔NN↔iSTFT
-
-
-
-6. Next Steps
-
-Write training scripts and prepare dataset
-
-Prototype network in PyTorch; verify audio quality
-
-Export to ONNX, build TensorRT engine, test inference
-
-Scaffold JUCE plugin and integrate inference loop
-
-Profile latency & optimize FFT/inference balance
-
-
-
-
+////////////////////////////////////////////////////////////////////////////////
+// __Project ::(Z444-2):: XodDDSPVox                                         \\\
+////////////////////////////////////////////////////////////////////////////////
+
+Title:
+XodDDSPVox – Real-Time ML Phase Vocoder Plugin
+
+Definition:
+A VST3 plugin for real-time spectral transformation using a neural network phase processor between STFT and iSTFT.
+→ 1st desired outcome: Real-time VST3 plugin with GPU-accelerated phase vocoding
+→ 2nd desired outcome: Neural control of pitch, stretch, and style via control vector
+
+// *------------------------------------------------------*
+// ((Step 1::Goals))
+// *------------------------------------------------------*
+* Implement efficient C++ STFT → ML Inference → iSTFT audio pipeline
+* Train a U-Net + FiLM model on audio STFT magnitudes to predict complex phase
+* Export PyTorch model to ONNX with dynamic time dimension
+* Build and deploy TensorRT engine for real-time GPU inference
+* Integrate ML inference into JUCE `processBlock()` loop with low latency
+
+// *------------------------------------------------------*
+// ((Step 2::Diagnose Root Problems & Eliminate))
+// *------------------------------------------------------*
+ROOT PROBLEM (1): No valid GPU inference interface in plugin  
+SOLUTION (1): TensorRT deployment via ONNX, dynamic axes, FP16 engine
+
+ROOT PROBLEM (2): Format mismatch between C++ STFT and ML input  
+SOLUTION (2): Validate tensor shape, scaling, layout (NCHW, batch=1), and control vector
+
+// *------------------------------------------------------*
+// ((Step 3::Align & Execute))
+// *------------------------------------------------------*
+KINGPIN:  
+**Define and validate the correct tensor format (STFT mag + control → phase map) used between C++ and ML model.**
+
+This is the most immediate bottleneck. Without a verified tensor format, model training cannot begin correctly, and real-time inference cannot be tested or integrated. This includes defining the shape, scaling, layout (e.g., NCHW or NHWC), dynamic time support, stereo handling, and control vector injection. A small test loop using dummy data and a mock Python model must be implemented to validate C++ ↔ ML format compatibility. Once solved, model training, export, and inference integration can proceed confidently.
+
+// *------------------------------------------------------*
+// Links:
+// *------------------------------------------------------*
+* PyTorch U-Net Dev: ~/ml/models/unet_film.py  
+* Dataset: ~/ml/data/stems/  
+* TensorRT Docs: https://docs.nvidia.com/deeplearning/tensorrt  
+* JUCE Framework: https://juce.com/
+
+// *------------------------------------------------------*
+// Notes:
+// *------------------------------------------------------*
+* Prior project-wide kingpin (goal): Export ONNX with dynamic time axis → build usable TensorRT engine  
+* Current blocker is upstream: tensor interface must be solid before export is meaningful  
+* Consider audio buffer size vs FFT hop alignment when testing dynamic time dimension
+
+// *------------------------------------------------------*
+// Progress:
+// *------------------------------------------------------*
+start 2025/07/01  
+current 2025/07/10  
+
+Freeze State:  
+→ STFT/iSTFT and COLA working for stereo input  
+→ Control vector design in progress  
+→ Next step: verify tensor interface and mock inference cycle
+
+// *------------------------------------------------------*
+// Completed Form:
+// *------------------------------------------------------*
+* C++ plugin with STFT → TensorRT inference → iSTFT
+* ML model trained with control vector for pitch/stretch
+* Real-time spectral morphing with user-controllable parameters
+
+////////////////////////////////////////////////////////////////////////////////
